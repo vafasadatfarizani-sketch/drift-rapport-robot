@@ -1,5 +1,5 @@
 streamlit
 pandas
-requests
-google-genai
 plotly
+google-genai
+playwright
