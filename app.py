@@ -190,3 +190,5 @@ if 'df' in st.session_state:
             st.info(response.text)
         except Exception as e:
             st.error(f"AI-fel: {e}")
+import os
+os.system("playwright install chromium")
