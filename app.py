@@ -2,34 +2,21 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from google import genai
-import asyncio
-from playwright.async_api import async_playwright
-import io
 
-st.set_page_config(page_title="Driftrapport Voi 3PL", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="ISMG Driftrapport", page_icon="⚡", layout="wide")
 
-st.title("⚡ Driftrapport & Prestanda (Voisibility 3PL)")
+st.title("⚡ ISMG Drift & Prestanda Dashboard")
 
-# Sidopanel för inloggning & val
+# Sidopanel för API-nyckel
 with st.sidebar:
-    st.header("🔑 Voisibility 3PL Inloggning")
-    username = st.text_input("Användarnamn / E-post")
-    password = st.text_input("Lösenord", type="password")
-    
-    city = st.selectbox("Välj stad", ["Stockholm", "Uppsala"])
-    
-    col_d1, col_d2 = st.columns(2)
-    start_date = col_d1.date_input("Startdatum")
-    end_date = col_d2.date_input("Slutdatum")
-    
-    st.markdown("---")
-    st.header("🤖 Google AI Studio")
-    gemini_key = st.text_input("Gemini API-nyckel", type="password")
-    
-    st.markdown("---")
-    fetch_btn = st.button("🔄 Hämta & Uppdatera Data", type="primary")
+    st.header("⚙️ Inställningar")
+    gemini_key = st.text_input("Google AI Studio API-nyckel", type="password")
+    st.info("Klistra in din API-nyckel från Google AI Studio för automatiska AI-analyser.")
 
-# Poängberäkningsfunktion
+# Filuppladdning
+st.subheader("📁 Ladda upp CSV-fil")
+uploaded_file = st.file_uploader("Släpp din veckorepport eller månads-CSV från Voi här:", type=["csv"])
+
 def process_data(df):
     task_cols = [
         'Battery Swaps', 'Bonus Swaps', 'Deploys', 'Transports', 'Rebalances', 
@@ -77,75 +64,12 @@ def process_data(df):
     
     return summary.sort_values(by='Poäng', ascending=False)
 
-# Automatisk hämtning med Playwright
-async def fetch_csv_from_voi(user, pwd, selected_city):
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        
-        # 1. Gå till inloggningssidan
-        await page.goto("https://voisibility-3pl.voi.com/login")
-        await page.wait_for_load_state("networkidle")
-        
-        # 2. Logga in
-        await page.fill("input[type='email'], input[name='username'], input[name='email']", user)
-        await page.fill("input[type='password']", pwd)
-        await page.click("button[type='submit'], input[type='submit']")
-        await page.wait_for_load_state("networkidle")
-        
-        # 3. Välj rullgardinsmenyer baserat på stad
-        if selected_city == "Uppsala":
-            partner_val = "Mälaren 3PL"
-            city_val = "Uppsala"
-        else:
-            partner_val = "Stockholm 3PL"
-            city_val = "Stockholm"
-            
-        await page.select_option("select:nth-of-type(1)", label=partner_val)
-        await page.select_option("select:nth-of-type(2)", label=city_val)
-        
-        # 4. Klicka på Fetch CSV och hämta nedladdningen
-        async with page.expect_download() as download_info:
-            await page.click("button:has-text('Fetch CSV'), input[value='Fetch CSV'], text='Fetch CSV'")
-            
-        download = await download_info.value
-        download_path = await download.path()
-        
-        with open(download_path, "r", encoding="utf-8") as f:
-            content = f.read()
-            
-        await browser.close()
-        return content
-
-# Körs när man trycker på knappen
-if fetch_btn:
-    if not username or not password:
-        st.error("Vänligen ange användarnamn och lösenord.")
-    else:
-        with st.spinner(f"Loggar in och hämtar CSV för {city}..."):
-            try:
-                # Kör den asynkrona hämtningen
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                csv_text = loop.run_until_complete(fetch_csv_from_voi(username, password, city))
-                
-                df_downloaded = pd.read_csv(io.StringIO(csv_text))
-                st.session_state['df'] = df_downloaded
-                st.success("Datan har hämtats automatiskt!")
-            except Exception as err:
-                st.warning(f"Kunde inte automatiserat hämta datan direkt. Du kan använda manuell uppladdning nedan. Felkod: {err}")
-
-# Manuell uppladdning som reserv
-uploaded_file = st.file_uploader("Eller ladda upp CSV manuellt här:", type=["csv"])
 if uploaded_file is not None:
-    st.session_state['df'] = pd.read_csv(uploaded_file)
-
-# Visa resultat om data finns
-if 'df' in st.session_state:
-    summary_df = process_data(st.session_state['df'])
+    df = pd.read_csv(uploaded_file)
+    summary_df = process_data(df)
     
+    # KPI-kort
     st.markdown("---")
-    # Nyckeltal
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Aktiva Förare", len(summary_df))
     c2.metric("Totalt Tasks", int(summary_df['Total Tasks'].sum()))
@@ -154,34 +78,35 @@ if 'df' in st.session_state:
     
     st.markdown("---")
     
-    # Diagram
+    # Prestandadiagram
     fig = px.bar(
         summary_df, 
         x='Driver', 
         y='Poäng/hr', 
-        title=f"Poäng per Timme ({city})",
+        title="Prestanda: Poäng per Timme (Poäng/hr)",
         color='Poäng/hr',
         color_continuous_scale='Blues'
     )
     st.plotly_chart(fig, use_container_width=True)
     
     # Tabell
-    st.subheader("📋 Månadssammanställning")
+    st.subheader("📋 Sammanställning per Förare")
     st.dataframe(summary_df, use_container_width=True)
     
-    # AI-analys via Gemini
+    # AI-analys
     if gemini_key:
-        st.subheader("🤖 AI-Analys & Insikter (Gemini)")
+        st.markdown("---")
+        st.subheader("🤖 AI-Analys & Insikter (Google AI Studio)")
         try:
             client = genai.Client(api_key=gemini_key)
             prompt = f"""
-            Analysera följande månadsrapport för våra förare i {city}:
+            Analysera följande driftrapport för våra förare:
             {summary_df.to_string()}
             
             Skriv en kort, professionell rapport på svenska:
             1. Topp 3 prestationer baserat på Poäng/hr.
-            2. Vilka förare som utmärkt sig mest.
-            3. Rekommendationer för förbättring.
+            2. Utmärkande förarprestationer.
+            3. Rekommendationer och insikter för perioden.
             """
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
@@ -189,6 +114,6 @@ if 'df' in st.session_state:
             )
             st.info(response.text)
         except Exception as e:
-            st.error(f"AI-fel: {e}")
-import os
-os.system("playwright install chromium")
+            st.error(f"Kunde inte hämta AI-analys: {e}")
+else:
+    st.info("👆 Ladda upp din CSV-fil ovan för att visa rapporten.")
